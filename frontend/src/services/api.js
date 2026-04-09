@@ -10,7 +10,7 @@ const api = axios.create({
   },
 });
 
-// Request interceptor - attach JWT token and cache busting headers
+// Request interceptor - attach JWT token and cache-busting query param
 api.interceptors.request.use(
   (config) => {
     const token = sessionStorage.getItem('access_token');
@@ -18,11 +18,8 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
-    // Add cache busting headers for GET requests
+    // Add timestamp to GET requests to avoid stale browser caches.
     if (config.method === 'get') {
-      config.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
-      config.headers['Pragma'] = 'no-cache';
-      // Add timestamp to prevent caching
       config.params = {
         ...config.params,
         _t: new Date().getTime(),
@@ -36,11 +33,7 @@ api.interceptors.request.use(
 
 // Response interceptor - handle 401 and token refresh
 api.interceptors.response.use(
-  (response) => {
-    // Ensure no caching of responses
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
-    return response;
-  },
+  (response) => response,
   async (error) => {
     const originalRequest = error.config;
 
