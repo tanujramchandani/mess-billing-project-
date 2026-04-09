@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
 import toast from 'react-hot-toast';
@@ -15,24 +15,51 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('access_token'));
+  const [token, setToken] = useState(sessionStorage.getItem('access_token'));
   const [loading, setLoading] = useState(true);
+  const fetchProfileRef = useRef(null);
+  const lastFetchRef = useRef(0);
 
-  const fetchProfile = useCallback(async () => {
-    try {
-      console.log('[Auth] Fetching user profile...');
-      const response = await authAPI.getProfile();
-      console.log('[Auth] Profile received:', response.data);
-      setUser(response.data);
-    } catch (error) {
-      console.error('[Auth] Failed to fetch profile:', error);
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      setToken(null);
-      setUser(null);
+  const fetchProfile = useCallback(async (forceFresh = false) => {
+    // Prevent concurrent requests
+    if (fetchProfileRef.current && !forceFresh) {
+      return fetchProfileRef.current;
     }
+
+    // Prevent too frequent fetches (max once per 5 seconds)
+    const now = Date.now();
+    if (!forceFresh && now - lastFetchRef.current < 5000) {
+      return;
+    }
+
+    lastFetchRef.current = now;
+
+    const promise = (async () => {
+      try {
+        console.log('[Auth] Fetching user profile...');
+        const response = await authAPI.getProfile();
+        console.log('[Auth] Profile received:', response.data);
+        setUser(response.data);
+        return response.data;
+      } catch (error) {
+        console.error('[Auth] Failed to fetch profile:', error);
+        if (error.response?.status === 401) {
+          sessionStorage.removeItem('access_token');
+          sessionStorage.removeItem('refresh_token');
+          setToken(null);
+          setUser(null);
+        }
+        throw error;
+      } finally {
+        fetchProfileRef.current = null;
+      }
+    })();
+
+    fetchProfileRef.current = promise;
+    return promise;
   }, []);
 
+  // Initial profile fetch
   useEffect(() => {
     if (token) {
       fetchProfile().finally(() => setLoading(false));
@@ -41,14 +68,44 @@ export const AuthProvider = ({ children }) => {
     }
   }, [token, fetchProfile]);
 
+  // Periodic profile refresh - every 15 minutes
+  useEffect(() => {
+    if (!token) return;
+
+    const intervalId = setInterval(() => {
+      console.log('[Auth] Periodic profile refresh');
+      fetchProfile(true).catch((error) => {
+        console.error('[Auth] Periodic refresh failed:', error);
+      });
+    }, 15 * 60 * 1000); // 15 minutes
+
+    return () => clearInterval(intervalId);
+  }, [token, fetchProfile]);
+
+  // Refresh profile on window focus
+  useEffect(() => {
+    if (!token) return;
+
+    const handleFocus = () => {
+      console.log('[Auth] Window focus - refreshing profile');
+      fetchProfile(true).catch((error) => {
+        console.error('[Auth] Focus refresh failed:', error);
+      });
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [token, fetchProfile]);
+
   const login = async (credentials) => {
     try {
       const response = await authAPI.login(credentials);
       const { access, refresh, user: userData } = response.data;
-      localStorage.setItem('access_token', access);
-      localStorage.setItem('refresh_token', refresh);
+      sessionStorage.setItem('access_token', access);
+      sessionStorage.setItem('refresh_token', refresh);
       setToken(access);
       setUser(userData);
+      lastFetchRef.current = Date.now();
       toast.success(`Welcome back, ${userData.first_name || userData.username}!`);
       return userData;
     } catch (error) {
@@ -75,10 +132,11 @@ export const AuthProvider = ({ children }) => {
       const response = await authAPI.register(data);
       const { access, refresh, user: userData } = response.data;
       if (access) {
-        localStorage.setItem('access_token', access);
-        localStorage.setItem('refresh_token', refresh);
+        sessionStorage.setItem('access_token', access);
+        sessionStorage.setItem('refresh_token', refresh);
         setToken(access);
         setUser(userData);
+        lastFetchRef.current = Date.now();
         toast.success('Registration successful! Welcome aboard!');
         return userData;
       } else {
@@ -98,10 +156,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    sessionStorage.removeItem('access_token');
+    sessionStorage.removeItem('refresh_token');
     setToken(null);
     setUser(null);
+    fetchProfileRef.current = null;
+    lastFetchRef.current = 0;
     toast.success('Logged out successfully.');
   };
 
@@ -109,6 +169,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await authAPI.updateProfile(data);
       setUser(response.data);
+      lastFetchRef.current = Date.now();
       toast.success('Profile updated successfully!');
       return response.data;
     } catch (error) {

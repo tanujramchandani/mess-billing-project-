@@ -8,13 +8,25 @@ const api = axios.create({
   },
 });
 
-// Request interceptor - attach JWT token
+// Request interceptor - attach JWT token and cache busting headers
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('access_token');
+    const token = sessionStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Add cache busting headers for GET requests
+    if (config.method === 'get') {
+      config.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+      config.headers['Pragma'] = 'no-cache';
+      // Add timestamp to prevent caching
+      config.params = {
+        ...config.params,
+        _t: new Date().getTime(),
+      };
+    }
+    
     return config;
   },
   (error) => Promise.reject(error)
@@ -22,13 +34,17 @@ api.interceptors.request.use(
 
 // Response interceptor - handle 401 and token refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Ensure no caching of responses
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = sessionStorage.getItem('refresh_token');
 
       if (refreshToken) {
         try {
@@ -36,18 +52,23 @@ api.interceptors.response.use(
             refresh: refreshToken,
           });
           const { access } = response.data;
-          localStorage.setItem('access_token', access);
+          sessionStorage.setItem('access_token', access);
           originalRequest.headers.Authorization = `Bearer ${access}`;
+          // Add cache busting to retry
+          originalRequest.params = {
+            ...originalRequest.params,
+            _t: new Date().getTime(),
+          };
           return api(originalRequest);
         } catch (refreshError) {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
+          sessionStorage.removeItem('access_token');
+          sessionStorage.removeItem('refresh_token');
           window.location.href = '/login';
           return Promise.reject(refreshError);
         }
       } else {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+        sessionStorage.removeItem('access_token');
+        sessionStorage.removeItem('refresh_token');
         window.location.href = '/login';
       }
     }

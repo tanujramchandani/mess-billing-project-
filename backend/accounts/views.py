@@ -2,6 +2,9 @@ from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page, never_cache
+from django.views.decorators.http import condition
 
 from .models import User
 from .serializers import UserSerializer, RegisterSerializer, LoginSerializer, ChangePasswordSerializer
@@ -54,6 +57,22 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+    def retrieve(self, request, *args, **kwargs):
+        """Override retrieve to add cache control headers."""
+        response = super().retrieve(request, *args, **kwargs)
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
+
+    def update(self, request, *args, **kwargs):
+        """Override update to add cache control headers."""
+        response = super().update(request, *args, **kwargs)
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
 
 
 class UserListView(generics.ListAPIView):
