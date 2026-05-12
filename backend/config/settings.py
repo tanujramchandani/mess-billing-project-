@@ -78,16 +78,11 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'config.wsgi.application'
 import dj_database_url
-import os
-
-DATABASE_URL = os.environ.get("DATABASE_URL")
 
 DATABASES = {
-    "default": dj_database_url.config(
-        default=DATABASE_URL,
-        conn_max_age=600
+    'default': dj_database_url.parse(
+        'postgresql://postgres.jqhollicbqvifdphoced:Uiet238108Tanuj@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres'
     )
 }
 
